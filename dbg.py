@@ -1,6 +1,8 @@
+#!/usr/bin/env python3
 import collections, sys
 from Bio import Seq, SeqIO, SeqRecord
 import os
+import argparse
 
 class PyDBGAssembler:
     def __init__(
@@ -11,6 +13,7 @@ class PyDBGAssembler:
         else:
             self.output_path = os.path.join(self.cwd, 'assembled_contigs.fasta')
         self.kmer_len = kmer_len
+        self.completed_contigs_as_fasta = []
         # The minimum abundance of a kmer for it not to be discarded
         self.abund_filter_cutoff = low_abund_filter_threshold
         self.fa_or_fq_file_path_list = fa_or_fq_file_path_list
@@ -33,6 +36,7 @@ class PyDBGAssembler:
         self.current_build_kmer_rev = None
 
     def do_assembly(self):
+        print("Starting assembly")
         for kmer_key in self.kmer_count_dict:
             if kmer_key not in self.used_kmers_set:
                 self.current_build_kmer_fwd = kmer_key
@@ -42,32 +46,49 @@ class PyDBGAssembler:
                     self.used_kmers_set.add(y)
                     self.used_kmers_set.add(self._rev_comp(y))
                 self.list_of_completed_contigs.append(contig_as_string)
+        print("Done.")
 
-        # TODO I don't really know what this self.g_dict business is about.
-        # I think its for creating the de Bruijn graphs as a visual output.
-        # I'll debug it through and see where it gets us, but otherwise, I can just delete
-        self.g_dict = {}
-        heads = {}
-        tails = {}
-        for i, x in enumerate(self.list_of_completed_contigs):
-            self.g_dict[i] = ([], [])
-            heads[x[:k]] = (i, '+')
-            tails[self._rev_comp(x[-k:])] = (i, '-')
+        self._contig_list_to_fasta()
 
-        for i in self.g_dict:
-            x = self.list_of_completed_contigs[i]
-            for y in self._fwd_seq_generator(x[-k:]):
-                if y in heads:
-                    self.g_dict[i][0].append(heads[y])
-                if y in tails:
-                    self.g_dict[i][0].append(tails[y])
-            for z in self._fwd_seq_generator(self._rev_comp(x[:k])):
-                if z in heads:
-                    self.g_dict[i][1].append(heads[z])
-                if z in tails:
-                    self.g_dict[i][1].append(tails[z])
+        self._write_out_contig_fasta()
+        print("Assembly complete")
 
-        return self.g_dict, self.list_of_completed_contigs
+        # # TODO I don't really know what this self.g_dict business is about.
+        # # I think its for creating the de Bruijn graphs as a visual output.
+        # # I'll debug it through and see where it gets us, but otherwise, I can just delete
+        # self.g_dict = {}
+        # heads = {}
+        # tails = {}
+        # for i, x in enumerate(self.list_of_completed_contigs):
+        #     self.g_dict[i] = ([], [])
+        #     heads[x[:self.kmer_len]] = (i, '+')
+        #     tails[self._rev_comp(x[-self.kmer_len:])] = (i, '-')
+        #
+        # for i in self.g_dict:
+        #     x = self.list_of_completed_contigs[i]
+        #     for y in self._fwd_seq_generator(x[-self.kmer_len:]):
+        #         if y in heads:
+        #             self.g_dict[i][0].append(heads[y])
+        #         if y in tails:
+        #             self.g_dict[i][0].append(tails[y])
+        #     for z in self._fwd_seq_generator(self._rev_comp(x[:self.kmer_len])):
+        #         if z in heads:
+        #             self.g_dict[i][1].append(heads[z])
+        #         if z in tails:
+        #             self.g_dict[i][1].append(tails[z])
+        #
+        # return self.g_dict, self.list_of_completed_contigs
+
+    def _write_out_contig_fasta(self):
+        print(f"Writing out contig fasta to {self.output_path}")
+        with open(self.output_path, 'w') as f:
+            for line in self.completed_contigs_as_fasta:
+                f.write(f'{line}\n')
+        print("Done.")
+
+    def _contig_list_to_fasta(self):
+        for i, contig_seq in enumerate(self.list_of_completed_contigs):
+            self.completed_contigs_as_fasta.extend([f'>{i}', f'{contig_seq}'])
 
     def _get_contig(self):
         self.kmer_list_of_contig_fwd = self._get_contig_forward(self.current_build_kmer_fwd)
@@ -89,28 +110,36 @@ class PyDBGAssembler:
         c_fw = [kmer]
 
         while True:
-            if sum(x in self.kmer_count_dict for x in self._fwd_seq_generator(c_fw[-1])) != 1:
+            # If more than one of the candidate kmers exists in the dictionary
+            # Abandon further contig extension
+            if sum(candidate in self.kmer_count_dict for candidate in self._fwd_seq_generator(c_fw[-1])) != 1:
                 break
 
-            cand = [x for x in self._fwd_seq_generator(c_fw[-1]) if x in self.kmer_count_dict][0]
-            if cand == kmer or cand == self._rev_comp(kmer):
+            # If exactly one of the candidates kmers exists in the dictionary,
+            # this is the candidate we will use to build forwards
+            candidate = [x for x in self._fwd_seq_generator(c_fw[-1]) if x in self.kmer_count_dict][0]
+
+            if candidate == kmer or candidate == self._rev_comp(kmer):
                 break  # break out of cycles or mobius contigs
-            if cand == self._rev_comp(c_fw[-1]):
+
+            if candidate == self._rev_comp(c_fw[-1]):
                 break  # break out of hairpins
 
-            if sum(x in self.kmer_count_dict for x in self._rev_seq_generator(cand)) != 1:
+            if sum(x in self.kmer_count_dict for x in self._rev_seq_generator(candidate)) != 1:
                 break
 
-            c_fw.append(cand)
+            c_fw.append(candidate)
 
         return c_fw
 
     def _init_kmer_count_dict(self):
         """Create the dictionary that will hold the kmer counts"""
+        print('Creating kmer count dict')
         for file_path in self.fa_or_fq_file_path_list:
             self._get_list_of_reads_from_fq_or_fa_file(file_path)
             self._break_reads_into_kmers_and_pop_dict()
         self._remove_low_abund_kmers()
+        print('Done.')
 
     def _break_reads_into_kmers_and_pop_dict(self):
         for read in self.reads_of_file:
@@ -138,9 +167,9 @@ class PyDBGAssembler:
 
     def _get_list_of_reads_from_fq_or_fa_file(self, file_path):
         file_ext = os.path.splitext(file_path)[1]
-        if file_ext == 'fq' or file_ext == 'fastq':
+        if file_ext == '.fq' or file_ext == '.fastq':
             self.reads_of_file = SeqIO.parse(file_path, 'fastq')
-        elif file_ext == 'fasta' or file_ext == 'fa':
+        elif file_ext == '.fasta' or file_ext == '.fa':
             self.reads_of_file = SeqIO.parse(file_path, 'fasta')
         else:
             raise RuntimeError(f'unknown extension of file {file_path}')
@@ -182,15 +211,29 @@ def print_GFA(G,cs,k):
             print("L\t%d\t+\t%d\t%s\t%dM"%(i,j,o,k-1))
         for j,o in G[i][1]:
             print("L\t%d\t-\t%d\t%s\t%dM"%(i,j,o,k-1))
-    
+
+
+def process_args():
+    global args
+    default_output_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'assembled_contigs.fasta')
+    parser = argparse.ArgumentParser(
+        description='Simple Python de Brujin graph-based assembler adapted from https://github.com/pmelsted/dbg')
+    parser.add_argument("files", nargs='*', help="The seq files to generate contigs from")
+    parser.add_argument("-k", "--kmer_length", type=int, help="The length of kmer to use", default=20)
+    parser.add_argument("-o", "--output_path", help="Full path to which the output fasta should be written",
+                        default=default_output_dir)
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
+    args = process_args()
+    dbga = PyDBGAssembler(fa_or_fq_file_path_list=args.files, kmer_len=args.kmer_length, output_path=args.output_path)
+    dbga.do_assembly()
+
     # if len(sys.argv) < 2: exit("args: <k> <reads_1.fq> ...")
     # k = int(sys.argv[1])
     # d = build(sys.argv[2:],k,1)
     # G,cs = all_contigs(d,k)
-    dbga = PyDBGAssembler(fa_or_fq_file_path_list=['/Users/humebc/Google_Drive/projects/ed_cpp/data/test_kmer_pool.fasta'], kmer_len=20)
-    G, cs = dbga.do_assembly()
-    k = dbga.kmer_len
-    print_GFA(G,cs,k)
+    # G, cs = dbga.do_assembly()
+    # k = dbga.kmer_len
+    # print_GFA(G,cs,k)
