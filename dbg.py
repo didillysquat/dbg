@@ -201,18 +201,6 @@ class PyDBGAssembler:
         return self.kmer_list_of_contig[0] + ''.join(kmer[-1] for kmer in self.kmer_list_of_contig[1:])
 
 
-def print_GFA(G,cs,k):
-    print("H  VN:Z:1.0")
-    for i,x in enumerate(cs):
-        print("S\t%d\t%s\t*"%(i,x))
-        
-    for i in G:
-        for j,o in G[i][0]:
-            print("L\t%d\t+\t%d\t%s\t%dM"%(i,j,o,k-1))
-        for j,o in G[i][1]:
-            print("L\t%d\t-\t%d\t%s\t%dM"%(i,j,o,k-1))
-
-
 def process_args():
     global args
     default_output_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'assembled_contigs.fasta')
@@ -229,11 +217,3 @@ if __name__ == "__main__":
     args = process_args()
     dbga = PyDBGAssembler(fa_or_fq_file_path_list=args.files, kmer_len=args.kmer_length, output_path=args.output_path)
     dbga.do_assembly()
-
-    # if len(sys.argv) < 2: exit("args: <k> <reads_1.fq> ...")
-    # k = int(sys.argv[1])
-    # d = build(sys.argv[2:],k,1)
-    # G,cs = all_contigs(d,k)
-    # G, cs = dbga.do_assembly()
-    # k = dbga.kmer_len
-    # print_GFA(G,cs,k)
