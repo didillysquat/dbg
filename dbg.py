@@ -10,6 +10,8 @@ class PyDBGAssembler:
         self.cwd = os.path.dirname(os.path.realpath(__file__))
         if output_path is not None:
             self.output_path = output_path
+            if not os.path.exists(os.path.dirname(self.output_path)):
+                os.makedirs(os.path.dirname(self.output_path))
         else:
             self.output_path = os.path.join(self.cwd, 'assembled_contigs.fasta')
         self.kmer_len = kmer_len
