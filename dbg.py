@@ -252,6 +252,9 @@ def process_args():
     parser.add_argument("-k", "--kmer_length", type=int, help="The length of kmer to use")
     parser.add_argument("-o", "--output_path", help="Full path to which the output fasta should be written",
                         default=default_output_dir)
+    # parser.add_argument("-t", "--percent_abund_threshold",
+    #                     help="The minimum abundance at which a kmer must be found to be used in the assembly. "
+    #                          "Given as a float that is proportion of total kmer abundance. [0]", action)
     is_relaxed = parser.add_mutually_exclusive_group(required=False)
     is_relaxed.add_argument("--relaxed",
                         help="If relax is true then the assembler will allow contigs to continue to be build "
@@ -270,7 +273,7 @@ def process_args():
                         default=False)
     parser.add_argument("-v", "--verbosity", action="store_true", help="Enable a more verbose output [False]",
                         default=False)
-    return parser.parse_args(['--relaxed', '../data/test_fastq.fastq'])
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
