@@ -3,10 +3,12 @@ import collections, sys
 from Bio import Seq, SeqIO, SeqRecord
 import os
 import argparse
+import sys
 
 class PyDBGAssembler:
     def __init__(
-            self, fa_or_fq_file_path_list, output_path=None, kmer_len=31, low_abund_filter_threshold=0):
+            self, fa_or_fq_file_path_list, kmer_len, is_relaxed, is_pick_random, verbose, output_path=None,
+            low_abund_filter_threshold=0):
         self.cwd = os.path.dirname(os.path.realpath(__file__))
         if output_path is not None:
             self.output_path = output_path
@@ -14,7 +16,12 @@ class PyDBGAssembler:
                 os.makedirs(os.path.dirname(self.output_path))
         else:
             self.output_path = os.path.join(self.cwd, 'assembled_contigs.fasta')
-        self.kmer_len = kmer_len
+        self.is_relaxed = is_relaxed
+        if kmer_len is None:
+            if self.is_relaxed:
+                self.kmer_len = 20
+            else:
+                self.kmer_len = 31
         self.completed_contigs_as_fasta = []
         # The minimum abundance of a kmer for it not to be discarded
         self.abund_filter_cutoff = low_abund_filter_threshold
@@ -23,6 +30,12 @@ class PyDBGAssembler:
         self.contig_rev_list = []
         self.kmer_count_dict = collections.defaultdict(int)
         self._init_kmer_count_dict()
+        if not is_pick_random:
+            self.kmer_list_for_contigs = [a[0] for a in
+                                           sorted(self.kmer_count_dict.items(), key=lambda x:x[1], reverse=True)]
+        else:
+            self.kmer_list_for_contigs = list(self.kmer_count_dict.keys())
+        self.num_kmers = len(self.kmer_list_for_contigs)
         # A set that holds all of the kmers that have already been used to make a contig
         self.used_kmers_set = set()
         # A list that holds all of the contigs assembled so far
@@ -36,10 +49,20 @@ class PyDBGAssembler:
         # The current kmer from which we will build a contig from in the fwd and rev_comp
         self.current_build_kmer_fwd = None
         self.current_build_kmer_rev = None
+        self.verbose = verbose
+
+
 
     def do_assembly(self):
-        print("Starting assembly")
-        for kmer_key in self.kmer_count_dict:
+        print("Starting assembly...")
+        sys.stdout.write('.')
+        count = 0
+        one_percent = int(self.num_kmers / 100)
+        for kmer_key in self.kmer_list_for_contigs:
+            if count%one_percent == 0:
+                sys.stdout.write('.')
+                sys.stdout.flush()
+            count += 1
             if kmer_key not in self.used_kmers_set:
                 self.current_build_kmer_fwd = kmer_key
                 self.current_build_kmer_rev = self._rev_comp(self.current_build_kmer_fwd)
@@ -48,7 +71,7 @@ class PyDBGAssembler:
                     self.used_kmers_set.add(y)
                     self.used_kmers_set.add(self._rev_comp(y))
                 self.list_of_completed_contigs.append(contig_as_string)
-        print("Done.")
+        print("\nDone.")
 
         self._contig_list_to_fasta()
 
@@ -112,14 +135,24 @@ class PyDBGAssembler:
         c_fw = [kmer]
 
         while True:
-            # If more than one of the candidate kmers exists in the dictionary
-            # Abandon further contig extension
-            if sum(candidate in self.kmer_count_dict for candidate in self._fwd_seq_generator(c_fw[-1])) != 1:
-                break
+            # cand is abbrev. for candidate
+            cand_kmers = [(cand, self.kmer_count_dict[cand]) for cand in
+                          self._fwd_seq_generator(c_fw[-1]) if cand in self.kmer_count_dict]
 
-            # If exactly one of the candidates kmers exists in the dictionary,
-            # this is the candidate we will use to build forwards
-            candidate = [x for x in self._fwd_seq_generator(c_fw[-1]) if x in self.kmer_count_dict][0]
+            if not self.is_relaxed: # operating in strict mode
+                # If more than one of the candidate kmers exists in the dictionary
+                # Abandon further contig extension
+                if len(cand_kmers) != 1:
+                    break
+                    # If exactly one of the candidates kmers exists in the dictionary,
+                    # this is the candidate we will use to build forwards
+                candidate = cand_kmers[0][0]
+            else: # operating in relaxed mode
+                # allow there to be more than one suitable candidate and work with the candidate that is more abundant
+                if len(cand_kmers) != 0:
+                    candidate = sorted(cand_kmers, key=lambda x:x[1], reverse=True)[0][0]
+                else: # no candidates
+                    break
 
             if candidate == kmer or candidate == self._rev_comp(kmer):
                 break  # break out of cycles or mobius contigs
@@ -127,8 +160,15 @@ class PyDBGAssembler:
             if candidate == self._rev_comp(c_fw[-1]):
                 break  # break out of hairpins
 
-            if sum(x in self.kmer_count_dict for x in self._rev_seq_generator(candidate)) != 1:
-                break
+            if not self.is_relaxed:
+                # This check will only be made if we are operating in --strict mode
+                if sum(x in self.kmer_count_dict for x in self._rev_seq_generator(candidate)) != 1:
+                    break
+            else:
+                if candidate == c_fw[-1]:
+                    if self.verbose:
+                        print(f'breaking contig assembly due to homopolymer {candidate}')
+                    break
 
             c_fw.append(candidate)
 
@@ -209,13 +249,34 @@ def process_args():
     parser = argparse.ArgumentParser(
         description='Simple Python de Brujin graph-based assembler adapted from https://github.com/pmelsted/dbg')
     parser.add_argument("files", nargs='*', help="The seq files to generate contigs from")
-    parser.add_argument("-k", "--kmer_length", type=int, help="The length of kmer to use", default=20)
+    parser.add_argument("-k", "--kmer_length", type=int, help="The length of kmer to use")
     parser.add_argument("-o", "--output_path", help="Full path to which the output fasta should be written",
                         default=default_output_dir)
-    return parser.parse_args()
+    is_relaxed = parser.add_mutually_exclusive_group(required=False)
+    is_relaxed.add_argument("--relaxed",
+                        help="If relax is true then the assembler will allow contigs to continue to be build "
+                             "if there are more than 1 candidate extension kmers. In such cases, it will move "
+                             "the extension forwards with the most abundant kmer. [False]", action="store_true",
+                        default=False)
+    is_relaxed.add_argument("--strict",
+                        help="If strict is true then the assembler will not allow contigs to coninue to be built"
+                             "if there are more than 1 candidate extension kmers. If no flag is passed"
+                             "kmers will be used in order of abundance with more abundant kmers used first"
+                             " [True]", action="store_true",
+                        default=True)
+    parser.add_argument("--pick_by_random",
+                        help="If this flag is passed, the seed kmers from which the contigs will be assembled"
+                             "will be picked randomly from the count dict. [False]", action="store_true",
+                        default=False)
+    parser.add_argument("-v", "--verbosity", action="store_true", help="Enable a more verbose output [False]",
+                        default=False)
+    return parser.parse_args(['--relaxed', '../data/test_fastq.fastq'])
 
 
 if __name__ == "__main__":
     args = process_args()
-    dbga = PyDBGAssembler(fa_or_fq_file_path_list=args.files, kmer_len=args.kmer_length, output_path=args.output_path)
+    dbga = PyDBGAssembler(
+        fa_or_fq_file_path_list=args.files, kmer_len=args.kmer_length,
+        output_path=args.output_path, is_relaxed=args.relaxed, is_pick_random=args.pick_by_random,
+        verbose=args.verbosity)
     dbga.do_assembly()
