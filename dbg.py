@@ -22,6 +22,8 @@ class PyDBGAssembler:
                 self.kmer_len = 20
             else:
                 self.kmer_len = 31
+        else:
+            self.kmer_len = kmer_len
         self.completed_contigs_as_fasta = []
         # The minimum abundance of a kmer for it not to be discarded
         self.abund_filter_cutoff = low_abund_filter_threshold
