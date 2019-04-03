@@ -248,7 +248,7 @@ def process_args():
     default_output_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'assembled_contigs.fasta')
     parser = argparse.ArgumentParser(
         description='Simple Python de Brujin graph-based assembler adapted from https://github.com/pmelsted/dbg')
-    parser.add_argument("files", nargs='*', help="The seq files to generate contigs from", required=True)
+    parser.add_argument("files", nargs='+', help="The seq files to generate contigs from")
     parser.add_argument("-k", "--kmer_length", type=int, help="The length of kmer to use")
     parser.add_argument("-o", "--output_path", help="Full path to which the output fasta should be written",
                         default=default_output_dir)
