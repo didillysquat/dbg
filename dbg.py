@@ -7,8 +7,9 @@ import sys
 
 class PyDBGAssembler:
     def __init__(
-            self, fa_or_fq_file_path_list, kmer_len, is_relaxed, is_pick_random, verbose, output_path=None,
-            low_abund_filter_threshold=0):
+            self, fa_or_fq_file_path_list, kmer_len, is_relaxed, is_pick_random, verbose, remove,
+            low_abund_filter_threshold, output_path=None,
+            ):
         self.cwd = os.path.dirname(os.path.realpath(__file__))
         if output_path is not None:
             self.output_path = output_path
@@ -26,10 +27,12 @@ class PyDBGAssembler:
             self.kmer_len = kmer_len
         self.completed_contigs_as_fasta = []
         # The minimum abundance of a kmer for it not to be discarded
-        self.abund_filter_cutoff = low_abund_filter_threshold
+        self.abund_filter_cutoff = int(low_abund_filter_threshold)
         self.fa_or_fq_file_path_list = fa_or_fq_file_path_list
         self.contig_fwd_list = []
         self.contig_rev_list = []
+        # the total number of kmers e.g. [AACT, AACT, AACT, AGAT] == 4 not 2.
+        self.total_number_of_kmer_seqs = 0
         self.kmer_count_dict = collections.defaultdict(int)
         self._init_kmer_count_dict()
         if not is_pick_random:
@@ -52,6 +55,7 @@ class PyDBGAssembler:
         self.current_build_kmer_fwd = None
         self.current_build_kmer_rev = None
         self.verbose = verbose
+        self.remove = remove
 
 
 
@@ -173,6 +177,8 @@ class PyDBGAssembler:
                     break
 
             c_fw.append(candidate)
+            if self.remove:
+                del self.kmer_count_dict[candidate]
 
         return c_fw
 
@@ -192,9 +198,13 @@ class PyDBGAssembler:
             for seq in list_of_sub_seqs:
                 for km in self._create_kmers_in_sequence_generator(seq):
                     self.kmer_count_dict[km] += 1
+                    self.total_number_of_kmer_seqs += 1
                 rev_seq = self._rev_comp(seq)
                 for km in self._create_kmers_in_sequence_generator(rev_seq):
                     self.kmer_count_dict[km] += 1
+                    self.total_number_of_kmer_seqs += 1
+        print(f'{self.total_number_of_kmer_seqs} total kmers found; represented as '
+              f'{len(self.kmer_count_dict)} unique kmers')
 
     @staticmethod
     def _split_str_into_multiple_reads_by_n(seq_s):
@@ -205,9 +215,17 @@ class PyDBGAssembler:
         return str(read.seq)
 
     def _remove_low_abund_kmers(self):
-        low_abund_kmers = [x for x in self.kmer_count_dict if self.kmer_count_dict[x] < self.abund_filter_cutoff]
+        low_abund_kmers = [x for x in self.kmer_count_dict if
+                           self.kmer_count_dict[x] < self.abund_filter_cutoff]
+        print(f'{len(low_abund_kmers)} unique kmers to be removed at cutoff threshold of {self.abund_filter_cutoff}')
+        print(f'removing low abund kmers from count dict...')
         for kmer in low_abund_kmers:
             del self.kmer_count_dict[kmer]
+
+        print(f'{sum(self.kmer_count_dict.values())} total kmers and {len(self.kmer_count_dict)} unique kmers '
+              f'now remaining in count dict')
+        print('Done.')
+        print('Count dictionary population complete.')
 
     def _get_list_of_reads_from_fq_or_fa_file(self, file_path):
         file_ext = os.path.splitext(file_path)[1]
@@ -254,9 +272,9 @@ def process_args():
     parser.add_argument("-k", "--kmer_length", type=int, help="The length of kmer to use")
     parser.add_argument("-o", "--output_path", help="Full path to which the output fasta should be written",
                         default=default_output_dir)
-    # parser.add_argument("-t", "--percent_abund_threshold",
-    #                     help="The minimum abundance at which a kmer must be found to be used in the assembly. "
-    #                          "Given as a float that is proportion of total kmer abundance. [0]", action)
+    parser.add_argument("-t", "--abund_threshold", type=int,
+                        help="The minimum abundance at which a kmer must be found to be used in the assembly. "
+                             "Given as an int. [0]", default=0)
     is_relaxed = parser.add_mutually_exclusive_group(required=False)
     is_relaxed.add_argument("--relaxed",
                         help="If relax is true then the assembler will allow contigs to continue to be build "
@@ -275,6 +293,9 @@ def process_args():
                         default=False)
     parser.add_argument("-v", "--verbosity", action="store_true", help="Enable a more verbose output [False]",
                         default=False)
+    parser.add_argument("--remove",
+                        help="When set, this flag will mean that every kmer in the dictionary may stricly only be used"
+                             "once.", action="store_true", default=False)
     return parser.parse_args()
 
 
@@ -283,5 +304,5 @@ if __name__ == "__main__":
     dbga = PyDBGAssembler(
         fa_or_fq_file_path_list=args.files, kmer_len=args.kmer_length,
         output_path=args.output_path, is_relaxed=args.relaxed, is_pick_random=args.pick_by_random,
-        verbose=args.verbosity)
+        verbose=args.verbosity, remove=args.remove, low_abund_filter_threshold=args.abund_threshold)
     dbga.do_assembly()
