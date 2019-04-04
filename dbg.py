@@ -409,7 +409,7 @@ def process_args():
                              "for similarity. If they are identical, one of the contigs will be returned. If there are"
                              " differences between the contigs, the contig with the highest average per kmer support"
                              " will be returned.", action="store_true", default=False)
-    return parser.parse_args(['--remove', '--relaxed', '/Users/humebc/Google_Drive/projects/ed_cpp/data/test_fastq.fastq'])
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
