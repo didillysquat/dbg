@@ -223,8 +223,7 @@ class PyDBGAssembler:
         if kmer_set_of_list is None:
             for kmer in self.temp_used_build_kmers_set:
                 del self.kmer_count_dict[kmer]
-                if self._rev_comp(kmer) != kmer: # cannot delete a seq if rev comp is same as fwd comp.
-                    del self.kmer_count_dict[self._rev_comp(kmer)]
+                # no need to delete the rev comp as this has already been added to the temp_used...
         else:
             for kmer in kmer_set_of_list:
                 del self.kmer_count_dict[kmer]
@@ -280,7 +279,8 @@ class PyDBGAssembler:
             c_fw.append(candidate)
             if self.remove:
                 self.temp_used_build_kmers_set.add(candidate)
-                self.temp_used_build_kmers_set.add(self._rev_comp(candidate))
+                if self._rev_comp(candidate) != candidate:
+                    self.temp_used_build_kmers_set.add(self._rev_comp(candidate))
 
         return c_fw
 
@@ -409,7 +409,7 @@ def process_args():
                              "for similarity. If they are identical, one of the contigs will be returned. If there are"
                              " differences between the contigs, the contig with the highest average per kmer support"
                              " will be returned.", action="store_true", default=False)
-    return parser.parse_args()
+    return parser.parse_args(['--remove', '--relaxed', '/Users/humebc/Google_Drive/projects/ed_cpp/data/test_fastq.fastq'])
 
 
 if __name__ == "__main__":
